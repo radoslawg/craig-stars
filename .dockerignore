@@ -1,0 +1,15 @@
+.git
+.github
+.vscode
+**/node_modules
+**/.DS_Store
+data
+dist
+tmp
+frontend/build
+frontend/.svelte-kit
+frontend/static/images
+frontend/src/lib/wasm
+frontend/test-results
+frontend/playwright-report
+docs/screenshots

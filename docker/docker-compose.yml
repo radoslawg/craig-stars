@@ -1,0 +1,25 @@
+# Portainer stack / docker compose file for craig-stars.
+# In Portainer: Stacks → Add stack → Web editor → paste this file.
+# Replace <your-github-user> with your GitHub user/org name (lower case).
+services:
+  craig-stars:
+    image: ghcr.io/<your-github-user>/craig-stars:latest
+    container_name: craig-stars
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # The URL players use to reach the game (used for invite links,
+      # Discord links and OAuth redirects).
+      CS_PUBLIC_URL: "http://localhost:8080"
+      # Set to "true" when the game is served over HTTPS (e.g. behind a reverse proxy).
+      CS_SECURE_COOKIE: "false"
+      # UID/GID that will own the files in the data volume.
+      PUID: "1000"
+      PGID: "1000"
+      TZ: "Europe/Warsaw"
+    volumes:
+      - craig-stars-data:/app/data
+
+volumes:
+  craig-stars-data:

@@ -1,0 +1,124 @@
+# Build the self-hosted craig-stars Docker image and push it to
+# GitHub Container Registry (ghcr.io/<owner>/craig-stars) and, optionally,
+# to your own registry.
+#
+# Optional extra registry – add these in Settings → Secrets and variables → Actions:
+#   variable  REGISTRY_IMAGE     e.g. registry.example.com/games/craig-stars
+#   secret    REGISTRY_USERNAME
+#   secret    REGISTRY_PASSWORD
+# Optional variable PLATFORMS (default linux/amd64), e.g. linux/amd64,linux/arm64
+name: Docker image
+
+on:
+  push:
+    branches: [develop]
+    tags: ["v*"]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: "Target platforms (comma separated)"
+        required: false
+        default: ""
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  GHCR_IMAGE: ghcr.io/${{ github.repository_owner }}/craig-stars
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need tags for the version number
+
+      - name: Work out version and image names
+        id: meta-vars
+        env:
+          EXTRA_IMAGE: ${{ vars.REGISTRY_IMAGE }}
+          INPUT_PLATFORMS: ${{ inputs.platforms }}
+          VAR_PLATFORMS: ${{ vars.PLATFORMS }}
+        run: |
+          # lower-case the owner: registries reject upper-case repository names
+          ghcr=$(echo "$GHCR_IMAGE" | tr '[:upper:]' '[:lower:]')
+          images="$ghcr"
+          if [ -n "$EXTRA_IMAGE" ]; then images="$images"$'\n'"$EXTRA_IMAGE"; fi
+          # registry host = first path segment if it looks like a host, else Docker Hub
+          registry=""
+          first="${EXTRA_IMAGE%%/*}"
+          case "$first" in *.*|*:*|localhost) registry="$first" ;; esac
+          {
+            echo "images<<EOF"; echo "$images"; echo "EOF"
+            echo "registry=${registry}"
+          } >> "$GITHUB_OUTPUT"
+
+          # version: nearest upstream tag (e.g. v0.12.3) + commits since, or the short sha
+          version=$(git describe --tags --always 2>/dev/null || git rev-parse --short HEAD)
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "build_time=$(date -u +'%y.%m.%d %H:%M:%S')" >> "$GITHUB_OUTPUT"
+
+          platforms="${INPUT_PLATFORMS:-${VAR_PLATFORMS:-linux/amd64}}"
+          echo "platforms=${platforms}" >> "$GITHUB_OUTPUT"
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.meta-vars.outputs.images }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+          labels: |
+            org.opencontainers.image.version=${{ steps.meta-vars.outputs.version }}
+
+      - name: Set up QEMU
+        if: contains(steps.meta-vars.outputs.platforms, 'arm')
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to your own registry
+        if: vars.REGISTRY_IMAGE != ''
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ steps.meta-vars.outputs.registry }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: ${{ steps.meta-vars.outputs.platforms }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.meta-vars.outputs.version }}
+            COMMIT=${{ github.sha }}
+            BUILD_TIME=${{ steps.meta-vars.outputs.build_time }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
