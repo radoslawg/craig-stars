@@ -8,94 +8,86 @@
 	import FilterAllyScanners from './FilterAllyScanners.svelte';
 	import FilterFleetCounts from './FilterFleetCounts.svelte';
 	import FilterIdleFleets from './FilterIdleFleets.svelte';
+	import FilterMinefields from './FilterMinefields.svelte';
 	import FilterScanners from './FilterScanners.svelte';
 	import FilterMyDesigns from './FilterMyDesigns.svelte';
 	import FilterAllyDesigns from './FilterAllyDesigns.svelte';
 	import FilterEnemyDesigns from './FilterEnemyDesigns.svelte';
-	import { clamp } from 'lodash-es';
 	import FilterPlanetNames from './FilterPlanetNames.svelte';
 	import FilterPlayerColors from './FilterPlayerColors.svelte';
+	import ScannerPercent from './ScannerPercent.svelte';
 
-	const { player, settings } = getGameContext();
+	const { player } = getGameContext();
+
+	let shareMap = $derived($player.relations.some((r) => r.shareMap));
+
+	type Props = {
+		// true if the toolbar is already showing the planet views
+		hideViews?: boolean;
+	};
+	let { hideViews = false }: Props = $props();
 </script>
 
-<div class="flex flex-col bottom-0 top-0 bg-base-200">
-	<div class="menu-title">Planet View</div>
-	<div class="flex flex-row w-full">
-		<div class="h-10 w-10">
-			<PlanetViewStatesNormal />
+<!-- everything is in the same order as the toolbar, in rows narrow enough for the menu -->
+<div class="flex flex-col bg-base-200">
+	{#if !hideViews}
+		<div class="menu-title">Planet View</div>
+		<div class="flex flex-row justify-center w-full">
+			<div class="size-10">
+				<PlanetViewStatesNormal />
+			</div>
+			<div class="size-10">
+				<PlanetViewStateSurfaceMinerals />
+			</div>
+			<div class="size-10">
+				<PlanetViewStateMineralConc />
+			</div>
+			<div class="size-10">
+				<PlanetViewStateHab />
+			</div>
+			<div class="size-10">
+				<PlanetViewStatePopulation />
+			</div>
 		</div>
-		<div class="h-10 w-10">
-			<PlanetViewStateSurfaceMinerals />
+	{/if}
+	<div class="menu-title">Scanners</div>
+	<div class="flex flex-row justify-center items-center w-full">
+		<div class="size-10">
+			<FilterScanners />
 		</div>
-		<div class="h-10 w-10">
-			<PlanetViewStateMineralConc />
-		</div>
-		<div class="h-10 w-10">
-			<PlanetViewStateHab />
-		</div>
-		<div class="h-10 w-10">
-			<PlanetViewStatePopulation />
+		{#if shareMap}
+			<!-- optionally turn off ally scanners if we are sharing maps -->
+			<div class="size-10">
+				<FilterAllyScanners />
+			</div>
+		{/if}
+		<div class="px-1">
+			<ScannerPercent />
 		</div>
 	</div>
 	<div class="menu-title">Filter</div>
 	<div class="flex flex-row justify-center w-full">
-		<div class="h-10 w-10">
+		<div class="size-10">
+			<FilterMinefields />
+		</div>
+		<div class="size-10">
 			<FilterPlanetNames />
 		</div>
-		<div class="h-10 w-10">
+		<div class="size-10">
 			<FilterFleetCounts />
 		</div>
-		<div class="h-10 w-10">
+		<div class="size-10">
 			<FilterIdleFleets />
 		</div>
-		<div class="h-10 w-10">
-			<FilterMyDesigns />
-		</div>
-		{#if $player.relations.filter((r) => r.shareMap).length > 0}
-			<div class="h-10 w-10">
-				<FilterAllyDesigns />
-			</div>
-		{/if}
-		<div class="h-10 w-10">
-			<FilterEnemyDesigns />
-		</div>
-		<div class="h-10 w-10">
-			<FilterPlayerColors />
-		</div>
 	</div>
-	<div class="menu-title">Scanners</div>
 	<div class="flex flex-row justify-center w-full">
-		<div class="h-10 w-10">
-			<FilterScanners />
-		</div>
-
-		{#if $player.relations.filter((r) => r.shareMap).length > 0}
-			<!-- optionally turn off ally scanners if we are sharing maps -->
-			<div class="h-10 w-10">
-				<FilterAllyScanners />
-			</div>
+		<FilterMyDesigns />
+		{#if shareMap}
+			<FilterAllyDesigns />
 		{/if}
-
-		<div class="px-1 my-auto">
-			<input
-				class="input input-sm w-16 pr-0 pl-1"
-				type="number"
-				min={0}
-				max={100}
-				step={10}
-				value={$settings.scannerPercent}
-				onchange={(e) => {
-					const val = parseInt(e.currentTarget.value);
-					if (val) {
-						$settings.scannerPercent = clamp(val, 0, 100);
-						e.currentTarget.value = `${$settings.scannerPercent}`;
-					} else {
-						$settings.scannerPercent = 0;
-						e.currentTarget.value = '0';
-					}
-				}}
-			/>
+		<FilterEnemyDesigns />
+		<div class="size-10">
+			<FilterPlayerColors />
 		</div>
 	</div>
 </div>

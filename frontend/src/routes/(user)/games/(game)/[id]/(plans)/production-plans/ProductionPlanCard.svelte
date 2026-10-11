@@ -2,7 +2,12 @@
 	import type { ProductionPlan } from '#lib/types/cs-proto.js';
 	import type { DesignFinder } from '#lib/services/Universe.js';
 	import { getQueueItemShortName } from '#lib/types/Planet.js';
-	import { getAutoAlchemyDescription, hasQuantity, isAuto } from '#lib/types/QueueItemType.js';
+	import {
+		getAutoAlchemyDescription,
+		getQuantityText,
+		hasQuantity,
+		isAuto
+	} from '#lib/types/QueueItemType.js';
 	import { Trash } from '@steeze-ui/heroicons';
 	import { Icon } from '@steeze-ui/svelte-icon';
 
@@ -28,14 +33,14 @@
 >
 	<div class="card-body">
 		<h2 class="card-title">
-			<a class="cs-link" {href}>{plan.name}</a>
+			<a class="cs-link min-w-0" {href}>{plan.name}</a>
 		</h2>
 		<div class="flex flex-col gap-2">
 			<div class="flex flex-row">
 				<div class="font-semibold mr-2">Name</div>
-				<div>{plan.name}</div>
+				<div class="min-w-0">{plan.name}</div>
 			</div>
-			<ul class="w-full h-full">
+			<ul class="size-full">
 				{#each plan.items as queueItem, index (index)}
 					<li class="pl-1">
 						<div
@@ -49,7 +54,10 @@
 								{getQueueItemShortName(queueItem, designFinder)}
 							</div>
 							<div>
-								{#if hasQuantity(queueItem.type)}{queueItem.quantity}{/if}
+								{#if hasQuantity(queueItem.type)}{getQuantityText(
+										queueItem.type,
+										queueItem.quantity
+									)}{/if}
 							</div>
 						</div>
 					</li>

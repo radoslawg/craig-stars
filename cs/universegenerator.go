@@ -38,6 +38,16 @@ func (ug *universeGenerator) Area() Vector {
 	return ug.area
 }
 
+// count the tokens of a fleet or starbase that starts the game already built
+func countStartingTokens(fleet *Fleet) {
+	for _, token := range fleet.Tokens {
+		if token.design != nil {
+			token.design.Spec.NumBuilt += token.Quantity
+			token.design.Spec.NumInstances += token.Quantity
+		}
+	}
+}
+
 // Generate a new universe using a UniverseGenerator
 func (ug *universeGenerator) GenerateWithUniverse(universe *Universe) error {
 	ug.log.Debug("Generating universe", slog.String("Size", string(ug.Size)))
@@ -83,6 +93,7 @@ func (ug *universeGenerator) GenerateWithUniverse(universe *Universe) error {
 			if planet.Starbase != nil {
 				planet.Starbase.InjectDesigns(player.Designs)
 				planet.Starbase.Spec = ComputeFleetSpec(&ug.Rules, player, planet.Starbase)
+				countStartingTokens(planet.Starbase)
 			}
 			planet.Spec = ComputePlanetSpec(&ug.Rules, player, planet)
 			if err := planet.PopulateProductionQueueDesigns(player); err != nil {
@@ -98,6 +109,7 @@ func (ug *universeGenerator) GenerateWithUniverse(universe *Universe) error {
 		player := ug.getPlayer(fleet.PlayerNum)
 		fleet.InjectDesigns(player.Designs)
 		fleet.Spec = ComputeFleetSpec(&ug.Rules, player, fleet)
+		countStartingTokens(fleet)
 	}
 
 	// TODO: chicken and egg problem. Player spec needs planet spec for resources, planet spec needs player spec for defense/scanner
@@ -761,7 +773,7 @@ func (ug *universeGenerator) generatePlayerShipDesigns() error {
 	for _, player := range ug.Players {
 		designNames := map[string]bool{}
 		num := 1
-		for _, startingPlanet := range player.Race.Spec.StartingPlanets {
+		for _, startingPlanet := range startingPlanetsForSize(&ug.Rules, ug.Size, player.Race.Spec.StartingPlanets) {
 			for _, startingFleet := range startingPlanet.StartingFleets {
 				if designNames[startingFleet.Name] {
 					// only create one design per name, i.e. Scout, Armed Probe
@@ -852,7 +864,7 @@ func (ug *universeGenerator) generatePlayerStartingPlanets() error {
 		// * Assign random starting planets to each "team" maximizing distance between enemy factions
 		// * Place allied homeworlds around each initial planet within a smaller range
 		// * Place players within each faction randomly and assign starting planets
-		for _, startingPlanet := range player.Race.Spec.StartingPlanets {
+		for _, startingPlanet := range startingPlanetsForSize(rules, ug.Size, player.Race.Spec.StartingPlanets) {
 			if !startingPlanet.Homeworld && homeworld == nil {
 				// Since extra planets _have_ to be placed around the homeworld,
 				// the homeworld needs to be the first thing we place
@@ -1120,10 +1132,10 @@ func (ug *universeGenerator) maxPlayersAndPlanets() {
 
 // create initial starbase designs for a player
 func (ug *universeGenerator) createStartingStarbaseDesigns(techStore *TechStore, player *Player, designNum int) []*ShipDesign {
-	numStartingPlanets := len(player.Race.Spec.StartingPlanets)
-	designs := make([]*ShipDesign, numStartingPlanets)
+	startingPlanets := startingPlanetsForSize(&ug.Rules, ug.Size, player.Race.Spec.StartingPlanets)
+	designs := make([]*ShipDesign, len(startingPlanets))
 
-	for i, startingPlanet := range player.Race.Spec.StartingPlanets {
+	for i, startingPlanet := range startingPlanets {
 		var starbase *ShipDesign
 		var purpose ShipDesignPurpose
 		switch {

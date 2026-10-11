@@ -46,7 +46,10 @@ export default defineConfig({
 						'd3-zoom',
 						'd3-scale',
 						'd3-quadtree',
-						'hotkeys-js'
+						'hotkeys-js',
+						'layercake',
+						'@steeze-ui/heroicons',
+						'@steeze-ui/svelte-icon'
 					]
 				},
 				test: {

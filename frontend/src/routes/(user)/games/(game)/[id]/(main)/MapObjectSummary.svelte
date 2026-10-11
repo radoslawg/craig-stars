@@ -14,6 +14,7 @@
 		Wormhole
 	} from '#lib/types/cs-proto.js';
 	import { MapObjectType } from '#lib/types/cs-proto.js';
+	import { getTokenDamage } from '#lib/types/Fleet.js';
 	import { getMapObjectName } from '#lib/types/MapObject.js';
 	import FleetSummary from './FleetSummary.svelte';
 	import MinefieldSummary from './MinefieldSummary.svelte';
@@ -35,13 +36,13 @@
 
 	function showStarbaseDesign(e: MouseEvent) {
 		if (selectedPlanet?.spec?.planetStarbaseSpec?.starbaseDesignNum) {
-			onShipDesignTooltip(
-				e,
-				$universe.getDesign(
-					selectedPlanet.mapObject?.playerNum,
-					selectedPlanet.spec.planetStarbaseSpec.starbaseDesignNum
-				)
+			const design = $universe.getDesign(
+				selectedPlanet.mapObject?.playerNum,
+				selectedPlanet.spec.planetStarbaseSpec.starbaseDesignNum
 			);
+			// we only know the damage of our own starbases
+			const starbase = $universe.getMyPlanetStarbase(selectedPlanet.mapObject?.num ?? 0);
+			onShipDesignTooltip(e, design, getTokenDamage(starbase?.tokens[0], design));
 		}
 	}
 
@@ -90,7 +91,10 @@
 	<div class="card-body p-2 gap-0">
 		<div class="flex flex-row items-center">
 			{#if !hideTitle}
-				<div class="flex-1 text-center text-lg font-semibold text-secondary">
+				<div
+					class="flex-1 min-w-0 truncate text-center text-lg font-semibold text-secondary"
+					title={getMapObjectName($selectedMapObject)}
+				>
 					{getMapObjectName($selectedMapObject)}
 				</div>
 			{/if}
@@ -103,7 +107,7 @@
 							showStarbaseDesign(e);
 						}}
 					>
-						<Starbase class="w-4 h-4 starbase" /></button
+						<Starbase class="size-4  starbase" /></button
 					>
 				{/if}
 				{#if !hideCycleButton}
@@ -115,7 +119,7 @@
 							selectNextMapObject();
 						}}
 					>
-						<Cycle class="w-4 h-4 fill-base-content hover:stroke-accent" /></button
+						<Cycle class="size-4  fill-base-content hover:stroke-accent" /></button
 					>
 				{/if}
 			</div>
