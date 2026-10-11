@@ -184,7 +184,7 @@ const (
 
 func FleetPurposeFromShipDesignPurpose(purpose ShipDesignPurpose) FleetPurpose {
 	switch purpose {
-	case ShipDesignPurposeScout:
+	case ShipDesignPurposeScout, ShipDesignPurposeCloakedScout:
 		return FleetPurposeScout
 	case ShipDesignPurposeColonizer:
 		return FleetPurposeColonizer
@@ -194,7 +194,7 @@ func FleetPurposeFromShipDesignPurpose(purpose ShipDesignPurpose) FleetPurpose {
 		return FleetPurposeFighter
 	case ShipDesignPurposeTorpedoFighter, ShipDesignPurposeBeamFighter:
 		return FleetPurposeCapitalShip
-	case ShipDesignPurposeFreighter, ShipDesignPurposeFuelFreighter, ShipDesignPurposeMultiPurposeFreighter:
+	case ShipDesignPurposeFreighter, ShipDesignPurposeFuelFreighter, ShipDesignPurposeMultiPurposeFreighter, ShipDesignPurposeCloakedFreighter:
 		return FleetPurposeFreighter
 	case ShipDesignPurposeColonistFreighter:
 		return FleetPurposeColonistFreighter
@@ -380,6 +380,38 @@ func (f *Fleet) Idle() bool {
 func (f *Fleet) Rename(name string) {
 	f.BaseName = name
 	f.Name = fmt.Sprintf("%s #%d", f.BaseName, f.Num)
+}
+
+// resetDefaultName renames a fleet that is still named for a design whose ships all moved to another fleet.
+// Fleets named by the player keep their names.
+func (f *Fleet) resetDefaultName(other *Fleet) {
+	if len(f.Tokens) == 0 || f.Name != fmt.Sprintf("%s #%d", f.BaseName, f.Num) {
+		return
+	}
+	for _, token := range f.Tokens {
+		if token.design == nil || token.design.Name == f.BaseName {
+			return
+		}
+	}
+	for _, token := range other.Tokens {
+		if token.design != nil && token.design.Name == f.BaseName {
+			f.Rename(f.Tokens[0].design.Name)
+			return
+		}
+	}
+}
+
+// clearUnusableTasks removes waypoint tasks this fleet can no longer do, like remote mining
+// after its miners were split off into another fleet.
+func (f *Fleet) clearUnusableTasks() {
+	if f.Spec.MiningRate > 0 {
+		return
+	}
+	for i := range f.Waypoints {
+		if f.Waypoints[i].Task == WaypointTaskRemoteMining {
+			f.Waypoints[i].Task = WaypointTaskNone
+		}
+	}
 }
 
 // RenameByPlayer sets a player chosen name for the fleet. Unlike Rename, the fleet number
