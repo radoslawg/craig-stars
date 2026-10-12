@@ -284,6 +284,24 @@ it('discards queued saves and late responses after resetting the context', async
 	expect(get(context.currentSelectedWaypointIndex)).toBe(0);
 });
 
+// Deleting the middle of a round trip would leave the fleet travelling from a planet to itself.
+it('drops the return waypoint when deleting the middle of a round trip', async () => {
+	clients.fleetClient.updateFleetOrders.mockImplementation(async ({ fleetOrders }) =>
+		response(fleetOrders)
+	);
+	const { context } = await setup();
+	await context.addWaypoint(dest(20), false);
+	await context.addWaypoint(dest(30), false);
+	await context.addWaypoint(dest(20), false);
+	const waypoints = () => get(context.commandedFleet)!.fleetOrders.waypoints;
+	expect(waypoints().map((wp) => wp.position!.x)).toEqual([10, 20, 30, 20]);
+
+	context.selectWaypoint(waypoints()[2]);
+	await context.deleteWaypoint();
+	expect(waypoints().map((wp) => wp.position!.x)).toEqual([10, 20]);
+	expect(get(context.currentSelectedWaypointIndex)).toBe(1);
+});
+
 // A delete tapped while an add is still being calculated waits for the add, so it deletes the new
 // waypoint and not whichever waypoint was selected before.
 it('queues a deletion behind a pending waypoint calculation', async () => {
@@ -351,4 +369,33 @@ it('keeps the surviving fleet after splitting every ship into an existing fleet'
 
 	expect(get(context.universe).fleets.map((f) => f.mapObject?.num)).toEqual([2]);
 	expect(get(context.commandedFleet)?.mapObject.num).toBe(2);
+});
+
+// Commanding a fleet that already has a route selects the end of the route, so new waypoints are
+// added after it, and the selection on the map goes there too. The view stays where it is.
+it('selects the end of the route when a fleet is commanded', async () => {
+	const { context, u } = await setup();
+	const routed = create(FleetSchema, {
+		mapObject: { type: MapObjectType.FLEET, playerNum: 1, num: 2, position: { x: 10, y: 10 } },
+		fleetOrders: {
+			waypoints: [
+				{ position: { x: 10, y: 10 } },
+				{ position: { x: 20, y: 10 } },
+				{ position: { x: 90, y: 40 } }
+			]
+		}
+	});
+	u.fleets = [fleet(1), routed];
+	const view = get(context.zoomTarget);
+
+	context.commandMapObject(routed);
+	expect(get(context.currentSelectedWaypointIndex)).toBe(2);
+	expect(get(context.selectedMapObject)?.mapObject?.position).toMatchObject({ x: 90, y: 40 });
+	expect(get(context.zoomTarget)).toBe(view);
+
+	// a fleet with nowhere to go leaves the selection alone
+	context.selectMapObject(u.fleets[0]);
+	context.commandMapObject(u.fleets[0]);
+	expect(get(context.selectedMapObject)).toBe(u.fleets[0]);
+	expect(get(context.currentSelectedWaypointIndex)).toBe(0);
 });

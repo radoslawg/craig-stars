@@ -38,7 +38,7 @@ import {
 import { UpdateWaypointResult } from '#lib/protogen/craig_stars/v1/fleetservice_pb.js';
 import { CommandedFleet } from '#lib/types/Fleet.js';
 import { getGameWithPlayersFlat, type GameWithPlayersFlat } from '#lib/types/Game.js';
-import { equal, key, type MapObjectLike } from '#lib/types/MapObject.js';
+import { deepSpaceMapObject, equal, key, type MapObjectLike } from '#lib/types/MapObject.js';
 import { getMapObjectTarget, getMapObjectTypeForMessageType } from '#lib/types/Message.js';
 import { CommandedPlanet } from '#lib/types/Planet.js';
 import { CommandedPlayer } from '#lib/types/Player.js';
@@ -567,7 +567,9 @@ export async function createGameContext(
 				zoomToMapObject(fleets[prevIndex]);
 
 				const fleet = fleets[prevIndex];
-				if (fleet.orbitingPlanetNum && fleet.orbitingPlanetNum !== None) {
+				if ((fleet.fleetOrders?.waypoints.length ?? 0) > 1) {
+					// commanding it selected the end of its route
+				} else if (fleet.orbitingPlanetNum && fleet.orbitingPlanetNum !== None) {
 					const planet = u.getMapObject({
 						targetType: MapObjectType.PLANET,
 						targetNum: fleet.orbitingPlanetNum,
@@ -605,7 +607,9 @@ export async function createGameContext(
 				const fleet = fleets[nextIndex];
 				commandMapObject(fleets[nextIndex]);
 				zoomToMapObject(fleets[nextIndex]);
-				if (fleet.orbitingPlanetNum && fleet.orbitingPlanetNum != None) {
+				if ((fleet.fleetOrders?.waypoints.length ?? 0) > 1) {
+					// commanding it selected the end of its route
+				} else if (fleet.orbitingPlanetNum && fleet.orbitingPlanetNum != None) {
 					const planet = u.getMapObject({
 						targetType: MapObjectType.PLANET,
 						targetNum: fleet.orbitingPlanetNum,
@@ -630,7 +634,22 @@ export async function createGameContext(
 		selectedWaypoint.update(() => wp);
 	}
 
+	// Command a mapobject because the player picked it. Like commandWithoutSelecting, and a fleet with
+	// a route also gets its last waypoint selected on the map, to match the waypoint that's selected
+	// for adding to. The view doesn't move.
 	function commandMapObject(mo: MapObjectLike) {
+		commandWithoutSelecting(mo);
+		if (mo.mapObject?.type === MapObjectType.FLEET) {
+			const waypoints = (mo as Fleet).fleetOrders?.waypoints ?? [];
+			if (waypoints.length > 1) {
+				selectWaypointMapObject(waypoints[waypoints.length - 1]);
+			}
+		}
+	}
+
+	// Command a mapobject without changing what's selected on the map, for when we're only
+	// refreshing the fleet or planet that's already commanded.
+	function commandWithoutSelecting(mo: MapObjectLike) {
 		commandedMapObject.update(() => mo);
 		mostRecentMapObject.update(() => mo);
 		if (mo.mapObject?.type === MapObjectType.PLANET) {
@@ -647,12 +666,10 @@ export async function createGameContext(
 			const cf = new CommandedFleet(mo as Fleet);
 			commandedFleet.update(() => cf);
 			commandedPlanet.update(() => undefined);
+			// select the end of the fleet's route, so new waypoints are added after it
 			selectedWaypoint.update(() => {
-				const fleet = mo as Fleet;
-				if (fleet?.fleetOrders?.waypoints && fleet.fleetOrders.waypoints.length) {
-					return fleet.fleetOrders.waypoints[fleet.fleetOrders.waypoints.length - 1];
-				}
-				return undefined;
+				const waypoints = (mo as Fleet).fleetOrders?.waypoints ?? [];
+				return waypoints[waypoints.length - 1];
 			});
 		}
 	}
@@ -746,14 +763,11 @@ export async function createGameContext(
 
 		// if we were commanding this fleet, recommand it to trigger reactivity
 		if (equal(cf, fleet)) {
-			commandMapObject(fleet);
-			// update the selected waypoint if we just updated the commandedFleet
-			if (
-				index > -1 &&
-				fleet.fleetOrders?.waypoints &&
-				fleet.fleetOrders.waypoints.length > index
-			) {
-				selectWaypoint(get(commandedFleet)!.fleetOrders.waypoints[index]);
+			commandWithoutSelecting(fleet);
+			// keep the same waypoint selected, or the last one if the one we had selected is gone
+			const waypoints = get(commandedFleet)!.fleetOrders.waypoints;
+			if (index > -1 && waypoints.length > 0) {
+				selectWaypoint(waypoints[Math.min(index, waypoints.length - 1)]);
 			}
 		}
 
@@ -1051,9 +1065,7 @@ export async function createGameContext(
 		isStale: () => boolean
 	): Promise<boolean> {
 		const fleet = get(commandedFleet);
-		const sw = get(selectedWaypoint);
 		const currentIndex = get(currentSelectedWaypointIndex);
-		const u = get(universe);
 		const fastest = get(settings).fastestWaypoint || fastestWaypoint;
 		if (!fleet) {
 			return false;
@@ -1073,15 +1085,9 @@ export async function createGameContext(
 		fleet.fleetOrders = result.fleet.fleetOrders;
 		void updateFleetOrders(fleet);
 
-		// select the new waypoint
+		// select the new waypoint, and what's there
 		selectWaypoint(get(commandedFleet)!.fleetOrders.waypoints[result.index]);
-		if (sw && sw.mapObjectTarget?.targetType && sw.mapObjectTarget?.targetNum) {
-			const mo = u.getMapObject(sw.mapObjectTarget);
-
-			if (mo) {
-				selectMapObject(mo);
-			}
-		}
+		selectWaypointMapObject(get(selectedWaypoint));
 
 		return true;
 	}
@@ -1107,7 +1113,6 @@ export async function createGameContext(
 		const fleet = get(commandedFleet);
 		const sw = get(selectedWaypoint);
 		const currentIndex = get(currentSelectedWaypointIndex);
-		const u = get(universe);
 		const fastest = get(settings).fastestWaypoint || fastestWaypoint;
 
 		if (!fleet || !sw) {
@@ -1159,15 +1164,24 @@ export async function createGameContext(
 				create(FleetOrdersSchema);
 			void updateFleetOrders(fleet);
 
-			// select the new waypoint
+			// select the waypoint where it ended up, and what's there
 			selectWaypoint(get(commandedFleet)!.fleetOrders.waypoints[currentIndex]);
-			if (sw && sw.mapObjectTarget?.targetType && sw.mapObjectTarget?.targetNum) {
-				const mo = u.getMapObject(sw.mapObjectTarget);
+			selectWaypointMapObject(get(selectedWaypoint));
+		}
+	}
 
-				if (mo) {
-					selectMapObject(mo);
-				}
+	// select whatever is at a waypoint: its target, or the point in space for a waypoint with no target
+	function selectWaypointMapObject(wp: Waypoint | undefined) {
+		if (!wp) {
+			return;
+		}
+		if (wp.mapObjectTarget?.targetType && wp.mapObjectTarget.targetNum) {
+			const mo = get(universe).getMapObject(wp.mapObjectTarget);
+			if (mo) {
+				selectMapObject(mo);
 			}
+		} else {
+			selectMapObject(deepSpaceMapObject(wp.position));
 		}
 	}
 
@@ -1183,13 +1197,23 @@ export async function createGameContext(
 		const fleet = get(commandedFleet);
 		const sw = get(selectedWaypoint);
 		const selectedWaypointIndex = get(currentSelectedWaypointIndex);
-		const u = get(universe);
 
 		if (!fleet || !sw || selectedWaypointIndex == 0) {
 			return;
 		}
 
 		fleet.fleetOrders.waypoints = fleet.fleetOrders?.waypoints.filter((wp) => wp != sw);
+
+		// deleting B from A -> B -> A leaves the fleet going from A to A, so drop the second A as well
+		const previous = fleet.fleetOrders.waypoints[selectedWaypointIndex - 1];
+		const next = fleet.fleetOrders.waypoints[selectedWaypointIndex];
+		if (
+			next &&
+			previous.position?.x === next.position?.x &&
+			previous.position?.y === next.position?.y
+		) {
+			fleet.fleetOrders.waypoints.splice(selectedWaypointIndex, 1);
+		}
 
 		// deleting down to a single waypoint turns off repeat orders
 		// (the player can still turn it back on to repeat waypoint 0's task)
@@ -1200,11 +1224,7 @@ export async function createGameContext(
 		// select the previous waypoint
 		const wp = fleet.fleetOrders?.waypoints[selectedWaypointIndex - 1];
 		selectWaypoint(wp);
-
-		const mo = u.getMapObject(wp.mapObjectTarget);
-		if (mo) {
-			selectMapObject(mo);
-		}
+		selectWaypointMapObject(wp);
 
 		updateFleetOrders(fleet);
 	}
@@ -1413,7 +1433,7 @@ export async function createGameContext(
 		// update the commanded fleet
 		const commandedFleet = Object.assign(new CommandedFleet(), updatedSource);
 		u.updateFleet(updatedSource);
-		commandMapObject(commandedFleet);
+		commandWithoutSelecting(commandedFleet);
 		if (equal(get(selectedMapObject), commandedFleet)) {
 			selectMapObject(commandedFleet);
 		}
@@ -1453,7 +1473,7 @@ export async function createGameContext(
 		const sourceFleet = fleets.find((f) => f.mapObject?.num == fleet.mapObject?.num);
 		if (sourceFleet) {
 			fleet = Object.assign(fleet, sourceFleet);
-			commandMapObject(fleet);
+			commandWithoutSelecting(fleet);
 		}
 
 		const u = get(universe);

@@ -9,14 +9,16 @@
 		MapObjectType,
 		VectorSchema,
 		WaypointDestSchema,
+		WaypointSchema,
 		type Fleet,
 		type Vector,
+		type Waypoint,
 		type WaypointDest
 	} from '#lib/types/cs-proto.js';
 	import { filterFleet } from '#lib/types/Filter.js';
 	import { emptyMapObject, type MapObjectLike, type Position } from '#lib/types/MapObject.js';
 	import { distance, emptyVector, equal } from '#lib/types/Vector.js';
-	import { create } from '@bufbuild/protobuf';
+	import { clone, create } from '@bufbuild/protobuf';
 	import { scaleLinear } from 'd3-scale';
 	import { select } from 'd3-selection';
 	import { zoom, ZoomTransform, type D3ZoomEvent, type ZoomBehavior } from 'd3-zoom';
@@ -90,14 +92,101 @@
 
 	let pointerDown = false;
 	let draggingWaypoint = false;
+	// the commanded fleet's waypoints from before the drag, drawn so the player can see what they're changing
+	let dragOrigin: Waypoint[] | undefined = $state();
 	let dragAndZoomEnabled = false;
 
 	// set to true if we are moving a waypoint to a position rather than a target
 	// this is enabled when the shift key is held
 	let positionWaypoint = false;
 
-	// if we just added a waypoint, don't drag it around
-	let waypointJustAdded = false;
+	// In add waypoint mode a tap adds a waypoint and a drag still pans the map, so the waypoint is
+	// added when the pointer lifts without having moved.
+	let pendingAdd: { found: MapObjectLike | undefined; position: Position } | undefined;
+
+	// A press on the commanded fleet's waypoint is either the start of a drag or a click. We only know
+	// which once the pointer moves or lifts, so the click waits for pointer up.
+	// a finger wobbles more than a mouse while it's held still
+	const dragMinDistance = 3;
+	const touchMinDistance = 10;
+	let pressedAt: { x: number; y: number } | undefined;
+	let pressedWaypoint: Waypoint | undefined;
+	let pendingSelect: MapObjectLike | undefined;
+
+	function clientPoint(event: FinderEvent['event']): { x: number; y: number } | undefined {
+		if ('clientX' in event) {
+			return { x: event.clientX, y: event.clientY };
+		}
+		const touch = event.touches[0] ?? event.changedTouches[0];
+		return touch ? { x: touch.clientX, y: touch.clientY } : undefined;
+	}
+
+	// true once the pointer has moved far enough from where it went down to be a drag, not a click
+	function movedSincePress(event: FinderEvent['event']): boolean {
+		const point = clientPoint(event);
+		if (!pressedAt || !point) {
+			return true;
+		}
+		const mouse = event instanceof PointerEvent && event.pointerType === 'mouse';
+		const minDistance = mouse ? dragMinDistance : touchMinDistance;
+		return Math.hypot(point.x - pressedAt.x, point.y - pressedAt.y) >= minDistance;
+	}
+
+	function clearPress() {
+		pressedAt = undefined;
+		pressedWaypoint = undefined;
+		pendingSelect = undefined;
+		pendingAdd = undefined;
+		clearTimeout(longPressTimer);
+		longPressTimer = undefined;
+	}
+
+	// Holding a finger still on a mapobject opens its context menu, like a right click with a mouse.
+	const longPressMs = 500;
+	let longPressTimer: ReturnType<typeof setTimeout> | undefined;
+	// some browsers also send a contextmenu event for a long press, ignore it if we already handled it
+	let longPressed = false;
+
+	function startLongPress(event: FinderEvent['event'], found: MapObjectLike) {
+		if (!(event instanceof PointerEvent) || event.pointerType === 'mouse') {
+			return;
+		}
+		clearTimeout(longPressTimer);
+		longPressTimer = setTimeout(() => {
+			longPressTimer = undefined;
+			// A touch always starts a pan, so we can't go by whether the scanner is zooming. The timer
+			// is cancelled if the finger actually moves.
+			if (!pointerDown || draggingWaypoint) {
+				return;
+			}
+			// this press was for the menu, not a click or a drag
+			longPressed = true;
+			pendingSelect = undefined;
+			pressedWaypoint = undefined;
+			swallowNextClick();
+			onScannerContextPopup(event, found.mapObject?.position ?? emptyVector());
+		}, longPressMs);
+	}
+
+	// Lifting the finger after a long press sends a click, which would close the menu we just
+	// opened as a click outside of it. Stop that one click before anything else sees it.
+	let swallowClick: ((e: MouseEvent) => void) | undefined;
+	function swallowNextClick() {
+		stopSwallowingClick();
+		swallowClick = (e: MouseEvent) => {
+			e.preventDefault();
+			e.stopPropagation();
+			stopSwallowingClick();
+		};
+		window.addEventListener('click', swallowClick, true);
+	}
+
+	function stopSwallowingClick() {
+		if (swallowClick) {
+			window.removeEventListener('click', swallowClick, true);
+			swallowClick = undefined;
+		}
+	}
 
 	// the measuring tape is dragged out with the middle button, or the right button while shift is held.
 	// It measures from where the drag started to the pointer, snapping to mapobjects at either end
@@ -177,8 +266,37 @@
 	}
 
 	// update clientWidth/height on resize
+	// The map is scaled to fit the scanner, so when the scanner changes shape, like a phone being
+	// rotated, we re-center on the part of the map the player was looking at.
 	function handleResize() {
-		clientRect = rect?.getBoundingClientRect() ?? { width: 100, height: 100 };
+		const next = rect?.getBoundingClientRect() ?? { width: 100, height: 100 };
+		if (next.width === clientRect.width && next.height === clientRect.height) {
+			return;
+		}
+		const center = transform
+			? create(VectorSchema, {
+					x: scaler.x.invert(transform.invertX(clientRect.width / 2)),
+					y: scaler.y.invert(transform.invertY(clientRect.height / 2))
+				})
+			: undefined;
+		clientRect = next;
+
+		// the zoom behavior is sized to the scanner, so swap in the new one
+		if (dragAndZoomEnabled) {
+			disableDragAndZoom();
+			enableDragAndZoom();
+		}
+		if (center) {
+			translateViewport(center);
+		}
+	}
+
+	// Only the window changing size re-fits the map. The scanner also changes size when the phone's
+	// command drawer opens, and the map shouldn't rescale under the player for that.
+	function onWindowResize() {
+		handleResize();
+		// a rotating phone can fire its resize before the layout settles
+		requestAnimationFrame(handleResize);
 	}
 
 	function handleKeyDown(e: KeyboardEvent) {
@@ -212,8 +330,16 @@
 	}
 
 	function handleZoom(e: D3ZoomEvent<HTMLElement, unknown>) {
+		const zoomed = e.transform.k !== scale;
 		transform = e.transform;
 		scale = transform.k;
+		if (zoomed) {
+			// a pinch isn't a long press or a tap. A pan is left to how far the finger has moved,
+			// because a finger held still always nudges the map a pixel or two
+			clearTimeout(longPressTimer);
+			longPressTimer = undefined;
+			pendingAdd = undefined;
+		}
 	}
 
 	function handleZoomStart() {
@@ -298,6 +424,12 @@
 			return;
 		}
 
+		if (longPressed) {
+			// this long press already opened the menu
+			longPressed = false;
+			return;
+		}
+
 		if (found && event instanceof MouseEvent) {
 			onScannerContextPopup(event, found.mapObject?.position ?? emptyVector());
 		}
@@ -312,11 +444,6 @@
 		if (tapeStart) {
 			tapeMove(position, found);
 			return;
-		}
-
-		if (draggingWaypoint && !zooming) {
-			positionWaypoint = event.shiftKey;
-			dragWaypointMove(position, found);
 		}
 
 		// check if we are over the commanded fleet's waypoint
@@ -339,15 +466,38 @@
 			}
 		}
 
+		if ((longPressTimer || pendingAdd) && movedSincePress(event)) {
+			// the finger moved, so this is a pan or a drag
+			clearTimeout(longPressTimer);
+			longPressTimer = undefined;
+			pendingAdd = undefined;
+		}
+
 		// check if we started a waypoint drag
 		// we only
 		// * start dragging once
 		// * if the pointer is down
-		// * if we are over a mapobject
+		// * on the waypoint we pressed. Passing over a waypoint while panning the map doesn't pick it up
+		// * once the pointer has moved, so a click on a waypoint isn't a drag
 		// * if we have a commanded fleet
-		if (!waypointJustAdded && !draggingWaypoint && pointerDown && fleetWaypoint) {
+		const dragWaypoint = pressedWaypoint;
+		if (
+			!draggingWaypoint &&
+			pointerDown &&
+			dragWaypoint &&
+			$commandedFleet &&
+			movedSincePress(event)
+		) {
 			draggingWaypoint = true;
-			onSelectWaypoint?.({ fleet: $commandedFleet, waypoint: fleetWaypoint });
+			pendingSelect = undefined;
+			pendingAdd = undefined;
+			dragOrigin = $commandedFleet.fleetOrders.waypoints.map((wp) => clone(WaypointSchema, wp));
+			onSelectWaypoint?.({ fleet: $commandedFleet, waypoint: dragWaypoint });
+		}
+
+		if (draggingWaypoint && !zooming) {
+			positionWaypoint = event.shiftKey;
+			dragWaypointMove(position, found);
 		}
 	}
 
@@ -382,30 +532,40 @@
 		}
 
 		pointerDown = true;
+		longPressed = false;
+		pressedAt = clientPoint(event);
+		const addingWaypoint = !!$commandedFleet && (shouldAddWaypoint || $settings.addWaypoint);
+		if (found && !addingWaypoint) {
+			startLongPress(event, found);
+		}
 
-		if (found) {
-			if ((shouldAddWaypoint || $settings.addWaypoint) && (await addWaypoint(found, position))) {
-				// ignore
+		// check if we pressed the commanded fleet's waypoint, it might be dragged
+		const fleetWaypoint =
+			found &&
+			$commandedFleet &&
+			$commandedFleet.fleetOrders.waypoints
+				.slice(1)
+				.find((wp) =>
+					equal(wp.position ?? emptyVector(), found.mapObject?.position ?? emptyVector())
+				);
+		pressedWaypoint = fleetWaypoint;
+		if (pressedWaypoint) {
+			// this press can drag the waypoint, so it mustn't pan the map as well
+			disableDragAndZoom();
+		}
+
+		if (addingWaypoint) {
+			// wait for the pointer to lift, this could be the start of a pan or a drag
+			pendingAdd = { found, position };
+		} else if (found) {
+			if (fleetWaypoint && $selectedWaypoint != fleetWaypoint) {
+				onSelectWaypoint?.({ fleet: $commandedFleet, waypoint: fleetWaypoint });
+			} else if (fleetWaypoint) {
+				// Selecting what's here can command a planet, which would end the drag before it starts.
+				// Wait to see if this press is a drag.
+				pendingSelect = found;
 			} else {
-				// check if we are clicked the commanded fleet's waypoint
-				const fleetWaypoint =
-					found &&
-					$commandedFleet &&
-					$commandedFleet.fleetOrders.waypoints
-						.slice(1)
-						.find((wp) =>
-							equal(wp.position ?? emptyVector(), found.mapObject?.position ?? emptyVector())
-						);
-
-				if (fleetWaypoint && $selectedWaypoint != fleetWaypoint) {
-					onSelectWaypoint?.({ fleet: $commandedFleet, waypoint: fleetWaypoint });
-				} else {
-					mapObjectSelected(found);
-				}
-			}
-		} else {
-			if (shouldAddWaypoint || $settings.addWaypoint) {
-				addWaypoint(found, position);
+				mapObjectSelected(found);
 			}
 		}
 	}
@@ -424,26 +584,35 @@
 			return;
 		}
 
-		if (draggingWaypoint) {
-			if (!dragAndZoomEnabled) {
-				enableDragAndZoom();
-			}
+		// the map can pan again, whatever this press was
+		enableDragAndZoom();
 
+		if (draggingWaypoint) {
 			dragWaypointDone(position, found);
+		} else if (pendingAdd && !movedSincePress(event)) {
+			// a tap in add waypoint mode
+			addWaypoint(pendingAdd.found, pendingAdd.position);
+		} else if (pendingSelect) {
+			// the press on the selected waypoint was a click after all
+			mapObjectSelected(pendingSelect);
 		}
+		if (longPressed) {
+			// the click from this lift comes right after, if the browser sends one at all
+			setTimeout(stopSwallowingClick, 400);
+		}
+		clearPress();
 		draggingWaypoint = false;
+		dragOrigin = undefined;
 		pointerDown = false;
-		waypointJustAdded = false;
 	}
 
 	function onPointerCancel() {
 		tapeDone();
+		clearPress();
 		draggingWaypoint = false;
+		dragOrigin = undefined;
 		pointerDown = false;
-		waypointJustAdded = false;
-		if (!$settings.addWaypoint) {
-			enableDragAndZoom();
-		}
+		enableDragAndZoom();
 	}
 
 	// move the selected waypoint around snapping to targets
@@ -488,7 +657,8 @@
 	function disableAddWaypointMode(event: MouseEvent) {
 		// ignore clicks on the add-waypoint toolbar button
 		const elem = event.target as Element;
-		if (elem.id == 'add-waypoint' || elem.parentElement?.id == 'add-waypoint') {
+		if (elem.closest('#add-waypoint, #delete-waypoint')) {
+			// deleting a waypoint shouldn't end add waypoint mode either
 			return;
 		}
 		if ($settings.addWaypoint) {
@@ -499,9 +669,8 @@
 
 	// if the shift key is held, add a waypoint instead of selecting a mapobject
 	async function addWaypoint(mo: MapObjectLike | undefined, position: Position): Promise<boolean> {
-		if (zooming) {
-			return false;
-		}
+		// This is only called for a tap. We can't go by whether the scanner is zooming, a touch always
+		// starts a pan and it hasn't ended yet when the finger lifts.
 		if (!$commandedFleet?.fleetOrders.waypoints) {
 			return false;
 		}
@@ -511,9 +680,6 @@
 			mo: mo?.mapObject ?? emptyMapObject(),
 			position: !mo?.mapObject ? { x: Number(position.x), y: Number(position.y) } : undefined
 		});
-		// Suppress dragging for this gesture immediately. Pointer-up clears the guard;
-		// an asynchronous completion must never set it again after the finger is lifted.
-		waypointJustAdded = true;
 		await onAddWaypoint(dest, fastestWaypoint);
 		return true;
 	}
@@ -552,26 +718,17 @@
 			}
 		});
 
-		// if settings change, enable/disable drag and zoom depending on if the addWaypoint
-		// mode is enabled or disabled
-		const unsubscribeSettings = settings.subscribe((settings) => {
-			if (settings.addWaypoint) {
-				disableDragAndZoom();
-			} else {
-				enableDragAndZoom();
-			}
-		});
-
 		// bind the v key to show the target with X
 		hotkeys('v', 'root', showTargetLocation);
 
 		return () => {
 			unsubscribeZoomTarget();
-			unsubscribeSettings();
 		};
 	});
 
 	onDestroy(() => {
+		clearTimeout(longPressTimer);
+		stopSwallowingClick();
 		hotkeys.unbind('v', 'root', showTargetLocation);
 	});
 
@@ -594,7 +751,7 @@
 	// x/y coords of a mapobject or waypoint
 </script>
 
-<svelte:window onresize={handleResize} onkeydown={handleKeyDown} onkeyup={handleKeyUp} />
+<svelte:window onresize={onWindowResize} onkeydown={handleKeyDown} onkeyup={handleKeyUp} />
 
 <div
 	class:cursor-grab={waypointHighlighted}
@@ -612,6 +769,7 @@
 			{pixelsPerLightYear}
 			{minObjectZoom}
 			locate={showLocator ? $mostRecentMapObject : undefined}
+			{dragOrigin}
 		/>
 		{#if transform}
 			<MapObjectQuadTreeFinder

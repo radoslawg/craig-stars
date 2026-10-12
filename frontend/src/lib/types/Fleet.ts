@@ -25,7 +25,7 @@ import { get as pluck } from 'lodash-es';
 import { type CargoType, totalCargo } from './Cargo';
 import type { CargoDest } from './CargoTransferRequest';
 import { None, StargateWarpSpeed } from './Consts';
-import { type MapObjectLike, owned } from './MapObject';
+import { deepSpaceMapObject, type MapObjectLike, owned } from './MapObject';
 import type { CommandedPlayer } from './Player';
 import { distance, emptyVector } from './Vector';
 import { enumToString } from './Enums';
@@ -96,7 +96,7 @@ export class CommandedFleet implements Fleet {
 		const mos = this.fleetOrders?.waypoints
 			.map((wp) =>
 				(wp.mapObjectTarget?.targetType ?? MapObjectType.UNSPECIFIED) == MapObjectType.UNSPECIFIED
-					? { mapObject: { position: wp.position } }
+					? deepSpaceMapObject(wp.position)
 					: universe.getMapObject(wp.mapObjectTarget)
 			)
 			.filter((m): m is MapObjectLike => !!m);
@@ -133,6 +133,86 @@ export class CommandedFleet implements Fleet {
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * Get the most fuel the fleet needs at once on the way to a waypoint. Fuel use adds up leg by leg
+	 * and starts over at each planet the fleet refuels at, so a route that ends at a starbase still
+	 * shows what it takes to get there.
+	 * @returns the fuel needed, in mg
+	 */
+	getFuelUsageToWaypoint(
+		player: CommandedPlayer,
+		universe: Universe,
+		waypointIndex: number
+	): number {
+		const waypoints = this.fleetOrders.waypoints;
+		let sinceRefuel = 0;
+		let most = 0;
+		for (let i = 1; i <= waypointIndex && i < waypoints.length; i++) {
+			const wp = waypoints[i];
+			sinceRefuel += wp.estFuelUsage;
+			most = Math.max(most, sinceRefuel);
+			const target =
+				wp.mapObjectTarget?.targetType === MapObjectType.PLANET
+					? universe.getPlanet(wp.mapObjectTarget.targetNum)
+					: undefined;
+			if (this.canFuel(player, target)) {
+				sinceRefuel = 0;
+			}
+		}
+		return most;
+	}
+
+	/**
+	 * Get the fuel left in the tanks when the fleet arrives at a waypoint, filling up at each planet
+	 * it can refuel at on the way.
+	 * @returns the fuel left, in mg. Negative if the fleet runs dry before it gets there
+	 */
+	getFuelOnArrival(player: CommandedPlayer, universe: Universe, waypointIndex: number): number {
+		const waypoints = this.fleetOrders.waypoints;
+		let fuel = this.fuel;
+		for (let i = 1; i <= waypointIndex && i < waypoints.length; i++) {
+			fuel -= waypoints[i].estFuelUsage;
+			if (fuel < 0) {
+				// it never gets any further
+				return fuel;
+			}
+			const wp = waypoints[i];
+			const target =
+				wp.mapObjectTarget?.targetType === MapObjectType.PLANET
+					? universe.getPlanet(wp.mapObjectTarget.targetNum)
+					: undefined;
+			if (i < waypointIndex && this.canFuel(player, target)) {
+				fuel = Math.max(fuel, this.spec.shipDesignSpec?.fuelCapacity ?? 0);
+			}
+		}
+		return fuel;
+	}
+
+	/**
+	 * Get the years it takes to reach a waypoint, travelling every leg before it.
+	 * @returns the years, or undefined if a leg is at warp 0 and the fleet never gets there
+	 */
+	getYearsToWaypoint(waypointIndex: number): number | undefined {
+		const waypoints = this.fleetOrders.waypoints;
+		let years = 0;
+		for (let i = 1; i <= waypointIndex && i < waypoints.length; i++) {
+			const warpSpeed = waypoints[i].warpSpeed;
+			if (warpSpeed === 0) {
+				return undefined;
+			}
+			if (warpSpeed === StargateWarpSpeed) {
+				years += 1;
+				continue;
+			}
+			const dist = Math.floor(
+				distance(waypoints[i - 1].position ?? emptyVector(), waypoints[i].position ?? emptyVector())
+			);
+			// even a leg shorter than a year of travel takes a year
+			years += Math.max(1, Math.ceil(dist / (warpSpeed * warpSpeed)));
+		}
+		return years;
 	}
 
 	/**
@@ -240,6 +320,16 @@ export function getTokenDamage(
 // true if this fleet can transfer cargo
 export function canTransferCargo(fleet: Fleet): boolean {
 	return (fleet.spec?.shipDesignSpec?.cargoCapacity ?? 0) > 0;
+}
+
+// True if opening the transfer dialog is any use for this fleet: it has a hold to fill, or it's
+// with another of our fleets it can trade fuel with.
+export function canTransferCargoOrFuel(fleet: Fleet, dest: CargoDest): boolean {
+	return (
+		canTransferCargo(fleet) ||
+		(dest?.mapObject?.type === MapObjectType.FLEET &&
+			dest.mapObject.playerNum === fleet.mapObject?.playerNum)
+	);
 }
 
 // true if this fleet can transfer this cargo type

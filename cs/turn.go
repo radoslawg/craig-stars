@@ -987,10 +987,8 @@ func (t *turnGenerator) mysteryTraderMove() {
 		}
 
 		// check for a course change
-		if mt.change(&t.game.Rules, t.game.Game) {
-			for _, player := range t.game.Players {
-				player.Messages = append(player.Messages, newMysteryTraderMessage(PlayerMessageMysteryTraderChangedCourse, mt))
-			}
+		changedCourse := mt.change(&t.game.Rules, t.game.Game)
+		if changedCourse {
 			t.log.Debug("mysteryTrader changed course",
 				slog.Int("MysteryTrader", mt.Num),
 			)
@@ -1008,7 +1006,8 @@ func (t *turnGenerator) mysteryTraderMove() {
 		)
 
 		if mt.Position == mt.Destination {
-			if mt.again(&t.game.Rules, t.game.Game, t.game.GetNumHumanPlayers()) {
+			otherTraders := slices.ContainsFunc(t.game.MysteryTraders, func(other *MysteryTrader) bool { return other != mt && !other.Delete })
+			if mt.again(&t.game.Rules, t.game.Game, t.game.GetNumHumanPlayers(), otherTraders) {
 				for _, player := range t.game.Players {
 					player.Messages = append(player.Messages, newMysteryTraderMessage(PlayerMessageMysteryTraderAgain, mt))
 				}
@@ -1021,6 +1020,14 @@ func (t *turnGenerator) mysteryTraderMove() {
 				)
 				// all done, bye bye trader
 				t.game.deleteMysteryTrader(mt)
+			}
+		}
+
+		// a trader that changed course and then left has nothing left to look at, so only tell
+		// players about traders that are still here
+		if changedCourse && !mt.Delete {
+			for _, player := range t.game.Players {
+				player.Messages = append(player.Messages, newMysteryTraderMessage(PlayerMessageMysteryTraderChangedCourse, mt))
 			}
 		}
 	}
@@ -2628,6 +2635,7 @@ func (t *turnGenerator) fleetBattle() {
 			}
 
 			// message each player
+			sharedWith := map[int]bool{}
 			for _, player := range playersAtPosition {
 				// player knows about the battle
 				player.BattleRecords = append(player.BattleRecords, *record)
@@ -2643,6 +2651,11 @@ func (t *turnGenerator) fleetBattle() {
 						// not sharing with this player
 						continue
 					}
+					if sharedWith[otherPlayer.Num] {
+						// another ally in this battle already shared it
+						continue
+					}
+					sharedWith[otherPlayer.Num] = true
 
 					// share the battle recording with this player
 					otherPlayer.BattleRecords = append(otherPlayer.BattleRecords, *record)
@@ -3018,42 +3031,48 @@ func (t *turnGenerator) fleetTransferOwner() {
 				token := &fleet.Tokens[i]
 				design := token.design
 
-				// give the player a copy of this design
-				newName := fmt.Sprintf("%s %s", player.Race.PluralName, design.Name)
-				targetPlayerDesign := targetPlayer.GetDesignByName(newName)
-				if targetPlayerDesign != nil {
-					if !targetPlayerDesign.SlotsEqual(design.Slots) {
-						// uh oh, design has been updated since the last time it was transferred to us...
-						// create a new design for the target player
-						num := targetPlayer.GetNextDesignNum(targetPlayer.Designs)
-						newDesign := *design
-						newDesign.GameDBObject = GameDBObject{}
-						newDesign.OriginalPlayerNum = player.Num
-						newDesign.PlayerNum = targetPlayer.Num
-						newDesign.Num = num
-						// rev the version and append it to the name
-						newDesign.Version++
-						newDesign.Name = fmt.Sprintf("%s v%d", newName, newDesign.Version)
-						targetPlayerDesign = &newDesign
-						targetPlayer.Designs = append(targetPlayer.Designs, targetPlayerDesign)
+				// ships going back to the player who designed them use that player's own design again, if they still have it
+				var targetPlayerDesign *ShipDesign
+				if design.OriginalPlayerNum == targetPlayer.Num {
+					for _, original := range targetPlayer.Designs {
+						if original.OriginalPlayerNum == None && original.Hull == design.Hull && original.SlotsEqual(design.Slots) {
+							targetPlayerDesign = original
+							break
+						}
 					}
-				} else {
-					// create a new design for the target player
-					num := targetPlayer.GetNextDesignNum(targetPlayer.Designs)
-					newDesign := *design
-					newDesign.GameDBObject = GameDBObject{}
-					newDesign.Name = newName
-					newDesign.OriginalPlayerNum = player.Num
-					newDesign.PlayerNum = targetPlayer.Num
-					newDesign.Num = num
-					targetPlayerDesign = &newDesign
-					targetPlayer.Designs = append(targetPlayer.Designs, targetPlayerDesign)
 				}
 
-				// make sure we don't update this spec
-				targetPlayerDesign.Spec.NumBuilt = 0
-				targetPlayerDesign.Spec.NumInstances = 0
+				if targetPlayerDesign == nil {
+					// give the player a copy of this design
+					newName := fmt.Sprintf("%s %s", player.Race.PluralName, design.Name)
+					targetPlayerDesign = targetPlayer.GetDesignByName(newName)
+					if targetPlayerDesign == nil || !targetPlayerDesign.SlotsEqual(design.Slots) {
+						// a new design for the target player
+						newDesign := *design
+						newDesign.GameDBObject = GameDBObject{}
+						newDesign.Name = newName
+						newDesign.OriginalPlayerNum = player.Num
+						newDesign.PlayerNum = targetPlayer.Num
+						newDesign.Num = targetPlayer.GetNextDesignNum(targetPlayer.Designs)
+						if targetPlayerDesign != nil {
+							// uh oh, design has been updated since the last time it was transferred to us...
+							// rev the version and append it to the name
+							newDesign.Version++
+							newDesign.Name = fmt.Sprintf("%s v%d", newName, newDesign.Version)
+						}
+						// the new owner hasn't built or been given any of these yet
+						newDesign.Spec.NumBuilt = 0
+						newDesign.Spec.NumInstances = 0
+						targetPlayerDesign = &newDesign
+						targetPlayer.Designs = append(targetPlayer.Designs, targetPlayerDesign)
+						t.game.addDesign(targetPlayerDesign)
+					}
 
+					// ships we were given count as built, so the design shows how many we have of how many we got
+					targetPlayerDesign.Spec.NumBuilt += token.Quantity
+				}
+
+				// the instance counts are redone for every design at the end of the turn
 				token.design = targetPlayerDesign
 				token.DesignNum = targetPlayerDesign.Num
 			}
@@ -3329,6 +3348,9 @@ func (t *turnGenerator) scan() error {
 
 		player.SubmittedTurn = false
 	}
+
+	// now that everyone has scanned, allies share who they know about
+	sharePlayerIntel(t.game.Players)
 
 	return nil
 }

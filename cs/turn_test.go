@@ -1918,6 +1918,52 @@ func Test_turn_fleetTransferOwner(t *testing.T) {
 
 }
 
+// Designs keep count of the ships a player was given, and ships given back go back to their original design.
+func Test_turn_fleetTransferOwner_designs(t *testing.T) {
+	s := TwoPlayerScenario()
+	s.Players[0].Player = NewPlayer(1, NewRace().WithPluralName("Rabbitoids"))
+	s.Players[0].Relations = []PlayerRelationship{{Relation: PlayerRelationFriend}, {Relation: PlayerRelationFriend}}
+	s.Players[1].Relations = []PlayerRelationship{{Relation: PlayerRelationFriend}, {Relation: PlayerRelationFriend}}
+	s.Players[0].Fleets[0].Waypoints = []ScenarioWaypoint{{To: "Planet 1", Task: WaypointTaskTransferFleet, TransferToPlayer: 2}}
+	u := newTestUniverse(t, s)
+	player1, player2, fleet := u.Player(1), u.Player(2), u.FleetFor(1, "Long Range Scout #1")
+	original := fleet.Tokens[0].design
+	player1Designs, player2Designs := len(player1.Designs), len(player2.Designs)
+	originalBuilt := original.Spec.NumBuilt
+
+	// give the scout away
+	u.GenerateTurn()
+	given := fleet.Tokens[0].design
+	assert.Equal(t, player2.Num, fleet.PlayerNum)
+	assert.Equal(t, "Rabbitoids Long Range Scout", given.Name)
+	assert.Equal(t, 1, given.Spec.NumBuilt)
+	assert.Equal(t, 1, given.Spec.NumInstances)
+	assert.Equal(t, 0, original.Spec.NumInstances)
+	assert.Equal(t, originalBuilt, original.Spec.NumBuilt)
+	assert.Len(t, player2.Designs, player2Designs+1)
+
+	// and get it back, as our own design
+	fleet.Waypoints[0].Task = WaypointTaskTransferFleet
+	fleet.Waypoints[0].TransferToPlayer = 1
+	u.GenerateTurn()
+	assert.Equal(t, player1.Num, fleet.PlayerNum)
+	assert.Same(t, original, fleet.Tokens[0].design)
+	assert.Len(t, player1.Designs, player1Designs)
+	assert.Equal(t, 1, original.Spec.NumInstances)
+	assert.Equal(t, originalBuilt, original.Spec.NumBuilt)
+	assert.Equal(t, 0, given.Spec.NumInstances)
+	assert.Equal(t, 1, given.Spec.NumBuilt)
+
+	// giving it away again reuses the design the other player already has
+	fleet.Waypoints[0].Task = WaypointTaskTransferFleet
+	fleet.Waypoints[0].TransferToPlayer = 2
+	u.GenerateTurn()
+	assert.Same(t, given, fleet.Tokens[0].design)
+	assert.Len(t, player2.Designs, player2Designs+1)
+	assert.Equal(t, 2, given.Spec.NumBuilt)
+	assert.Equal(t, 1, given.Spec.NumInstances)
+}
+
 func Test_turn_fleetBattle(t *testing.T) {
 	s := TwoPlayerScenario()
 	s.Players[0].Relations = []PlayerRelationship{{Relation: PlayerRelationFriend}, {Relation: PlayerRelationEnemy}}
@@ -2022,6 +2068,44 @@ func Test_turn_fleetBattle3Players(t *testing.T) {
 	// scout was destroyed, salvage created
 	assert.Equal(t, true, fleet2.Delete)
 	assert.Equal(t, 1, len(fg.Salvages))
+}
+
+// An ally who wasn't at a battle gets one report of it, even if several of their allies fought in it.
+func Test_turn_fleetBattleSharedOnce(t *testing.T) {
+	friend := PlayerRelationship{Relation: PlayerRelationFriend, ShareMap: true}
+	enemy := PlayerRelationship{Relation: PlayerRelationEnemy}
+	u := newTestUniverse(t, TestScenario{Players: []ScenarioPlayer{
+		{
+			Relations: []PlayerRelationship{friend, friend, enemy, friend},
+			Designs:   Designs(DesignStalwartDefender),
+			Fleets:    []ScenarioFleet{{Name: "Warships 1", Design: "Stalwart Defender", Waypoints: []ScenarioWaypoint{{Warp: 5}}}},
+		},
+		{
+			Relations: []PlayerRelationship{friend, friend, enemy, friend},
+			Designs:   Designs(DesignStalwartDefender),
+			Fleets:    []ScenarioFleet{{Name: "Warships 2", Design: "Stalwart Defender", Waypoints: []ScenarioWaypoint{{Warp: 5}}}},
+		},
+		{
+			Relations: []PlayerRelationship{enemy, enemy, friend, enemy},
+			Designs:   Designs(DesignLongRangeScout),
+			Fleets:    []ScenarioFleet{{Name: "Scout 3", Design: "Long Range Scout", Waypoints: []ScenarioWaypoint{{Warp: 5}}}},
+		},
+		// allied with the first two players, but far from the battle
+		{Relations: []PlayerRelationship{friend, friend, enemy, friend}},
+	}})
+
+	u.Run((*turnGenerator).fleetBattle)
+
+	absentAlly := u.Player(4)
+	assert.Len(t, u.Player(1).BattleRecords, 1)
+	assert.Len(t, absentAlly.BattleRecords, 1)
+	allyMessages := 0
+	for _, message := range absentAlly.Messages {
+		if message.Type == PlayerMessageBattleAlly {
+			allyMessages++
+		}
+	}
+	assert.Equal(t, 1, allyMessages)
 }
 
 // test a fleet with repeat patrol orders
@@ -2286,6 +2370,65 @@ func Test_turn_mysteryTraderAgain(t *testing.T) {
 	assert.Equal(t, 1, len(player.Messages))
 	assert.Equal(t, PlayerMessageMysteryTraderAgain, player.Messages[0].Type)
 	assert.NotEqual(t, Vector{49, 0}, mt.Destination)
+}
+
+// A trader that speeds up and then leaves the same year doesn't announce the course change.
+func Test_turn_mysteryTraderChangeCourseAndFinish(t *testing.T) {
+	s := SingleUnitScenario()
+	s.MysteryTraders = []MysteryTrader{
+		{
+			MapObject:     MapObject{Position: Vector{}},
+			WarpSpeed:     7,
+			Destination:   Vector{49, 0},
+			RequestedBoon: 5000,
+			RewardType:    MysteryTraderRewardResearch,
+		},
+	}
+	u := newTestUniverse(t, s)
+	game := u.Game
+	game.RandomEvents = true
+	// changes course, only speeds up, doesn't make another pass
+	game.Rules.random = newIntRandom(0, 1, 1)
+	mt := game.MysteryTraders[0]
+
+	u.Run((*turnGenerator).mysteryTraderMove)
+
+	assert.Equal(t, 8, mt.WarpSpeed)
+	assert.True(t, mt.Delete)
+	assert.Empty(t, game.Players[0].Messages)
+}
+
+// A trader slows down a warp for another pass, and leaves if another trader is still around.
+func Test_turn_mysteryTraderAgainRules(t *testing.T) {
+	trader := func(position, destination Vector) MysteryTrader {
+		return MysteryTrader{
+			MapObject:     MapObject{Position: position},
+			WarpSpeed:     10,
+			Destination:   destination,
+			RequestedBoon: 5000,
+			RewardType:    MysteryTraderRewardResearch,
+		}
+	}
+
+	s := SingleUnitScenario()
+	s.MysteryTraders = []MysteryTrader{trader(Vector{}, Vector{100, 0})}
+	u := newTestUniverse(t, s)
+	u.Game.RandomEvents = true
+	// no course change, another pass
+	u.Game.Rules.random = newIntRandom(1, 0)
+	u.Run((*turnGenerator).mysteryTraderMove)
+	assert.False(t, u.Game.MysteryTraders[0].Delete)
+	assert.Equal(t, 9, u.Game.MysteryTraders[0].WarpSpeed)
+
+	// with a second trader far from its destination, the first one leaves instead
+	s = SingleUnitScenario()
+	s.MysteryTraders = []MysteryTrader{trader(Vector{}, Vector{100, 0}), trader(Vector{0, 500}, Vector{2000, 500})}
+	u = newTestUniverse(t, s)
+	u.Game.RandomEvents = true
+	u.Game.Rules.random = newIntRandom(1, 0)
+	u.Run((*turnGenerator).mysteryTraderMove)
+	assert.True(t, u.Game.MysteryTraders[0].Delete)
+	assert.False(t, u.Game.MysteryTraders[1].Delete)
 }
 
 func Test_turn_mysteryTraderMeetNoReward(t *testing.T) {
