@@ -141,6 +141,15 @@ func (u *Universe) buildMaps(players []*Player) error {
 		if starbase.Delete {
 			continue
 		}
+		if planet := u.Planets[starbase.PlanetNum-1]; planet.PlayerNum != starbase.PlayerNum {
+			// a starbase left behind by a planet that was emptied, remove it
+			u.log.Warn("deleting starbase orbiting a planet its owner lost",
+				slog.Int("Player", starbase.PlayerNum),
+				slog.String("Starbase", starbase.Name),
+				slog.String("Planet", planet.Name))
+			starbase.Delete = true
+			continue
+		}
 		if err := u.addStarbase(starbase); err != nil {
 			return err
 		}
@@ -682,6 +691,10 @@ func (u *Universe) deleteMinefield(minefield *Minefield) {
 func (u *Universe) fleetsWithin(position Vector, radius float64) []*Fleet {
 	fleetsWithin := make([]*Fleet, 0, 10)
 	for _, fleet := range u.Fleets {
+		// Deleted fleets remain in the slice until the turn is saved.
+		if fleet.Delete {
+			continue
+		}
 		if isPointInCircle(fleet.Position, position, radius) {
 			fleetsWithin = append(fleetsWithin, fleet)
 		}

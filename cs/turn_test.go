@@ -1400,6 +1400,41 @@ func Test_turn_detonateMines(t *testing.T) {
 	}
 }
 
+func Test_turn_detonateMinesOverlappingFields(t *testing.T) {
+	u := newTestUniverse(t, TestScenario{Players: []ScenarioPlayer{
+		{
+			Player: NewPlayer(1, NewRace().WithPRT(SD)),
+			Minefields: []Minefield{
+				{MinefieldType: MinefieldTypeStandard, NumMines: 100, MinefieldOrders: MinefieldOrders{Detonate: true}},
+				{MinefieldType: MinefieldTypeStandard, NumMines: 100, MinefieldOrders: MinefieldOrders{Detonate: true}},
+			},
+		},
+		{
+			Designs: Designs(DesignLongRangeScout),
+			Fleets:  []ScenarioFleet{{Name: "Scout", Design: DesignLongRangeScout.Name}},
+		},
+	}})
+	fleet := u.Fleet("Scout")
+
+	// The first detonation destroys the scout. The second must not hit it again.
+	u.Run((*turnGenerator).detonateMines)
+
+	assert.True(t, fleet.Delete)
+	assert.Empty(t, fleet.Tokens)
+	for _, player := range u.Game.Players {
+		var hits int
+		for _, message := range player.Messages {
+			if message.Type == PlayerMessageFleetMinefieldHit {
+				hits++
+			}
+		}
+		assert.Equal(t, 1, hits, "player %d should receive one hit message", player.Num)
+	}
+	for _, minefield := range u.Game.Minefields {
+		assert.Equal(t, 75, minefield.NumMines)
+	}
+}
+
 func Test_turn_detonateMinesCargoCapacity(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -1544,6 +1579,48 @@ func Test_turn_testPacketMoveDeleteStarbase(t *testing.T) {
 	assert.Equal(t, true, starbase.Delete)
 	assert.Nil(t, nil, planet.Starbase)
 
+}
+
+func Test_turn_planetGrowDieOffDeleteStarbase(t *testing.T) {
+	s := SingleUnitScenario()
+	s.Planets[0].Starbase = "Starbase"
+	s.Planets[0].Cargo = Cargo{} // no colonists left, so the planet dies off when it grows
+	s.Players[0].Designs = append(s.Players[0].Designs, ShipDesign{Name: "Starbase", Hull: SpaceStation.Name})
+
+	u := newTestUniverse(t, s)
+	planet := u.Planet("Planet 1")
+	starbase := planet.Starbase
+
+	u.GenerateTurn()
+
+	// no pop, no starbase
+	assert.Equal(t, None, planet.PlayerNum)
+	assert.Equal(t, true, starbase.Delete)
+	assert.Nil(t, planet.Starbase)
+
+	// the starbase stays gone when the next turn loads the universe
+	u.GenerateTurn()
+	assert.Nil(t, planet.Starbase)
+	assert.Empty(t, u.Game.Starbases)
+}
+
+func Test_universe_buildMapsDeleteOrphanedStarbase(t *testing.T) {
+	s := SingleUnitScenario()
+	s.Planets[0].Starbase = "Starbase"
+	s.Players[0].Designs = append(s.Players[0].Designs, ShipDesign{Name: "Starbase", Hull: SpaceStation.Name})
+
+	u := newTestUniverse(t, s)
+	planet := u.Planet("Planet 1")
+	starbase := planet.Starbase
+
+	// a planet that died off with its starbase left behind
+	planet.emptyPlanet()
+
+	u.Game.buildMaps(u.Game.Players)
+
+	assert.Equal(t, true, starbase.Delete)
+	assert.Nil(t, planet.Starbase)
+	assert.NotContains(t, u.Game.getMapObjectsAtPosition(planet.Position), starbase)
 }
 
 func Test_turn_decayPackets(t *testing.T) {
