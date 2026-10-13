@@ -84,6 +84,12 @@ func Start(config configpkg.Config) error {
 		}
 	}
 
+	if viper.GetBool("ai-mode") {
+		if err := createAIGames(dbConn, config); err != nil {
+			return err
+		}
+	}
+
 	discordNotifier := newDiscordNotifier(dbConn, config)
 
 	// create a server
@@ -311,6 +317,7 @@ func Start(config configpkg.Config) error {
 	grpc.Handle(craig_starsv1connect.NewPlanetServiceHandler(NewPlanetServiceHandler(dbConn), connect.WithInterceptors(gameInterceptors...)))
 	grpc.Handle(craig_starsv1connect.NewFleetServiceHandler(NewFleetServiceHandler(dbConn), connect.WithInterceptors(gameInterceptors...)))
 	grpc.Handle(craig_starsv1connect.NewMinefieldServiceHandler(NewMinefieldServiceHandler(dbConn), connect.WithInterceptors(gameInterceptors...)))
+	grpc.Handle(craig_starsv1connect.NewPlayerNoteServiceHandler(NewPlayerNoteServiceHandler(), connect.WithInterceptors(gameInterceptors...)))
 
 	// Mount the grpc calls to /api/grpc
 	r.Group(func(r chi.Router) {

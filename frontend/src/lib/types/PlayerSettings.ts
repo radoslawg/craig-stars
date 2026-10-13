@@ -17,6 +17,7 @@ export class PlayerSettings implements FilterOptions {
 	planetViewState = PlanetViewState.Normal;
 	addWaypoint = false;
 	fastestWaypoint = false;
+	addLabel = false;
 	setPacketDest = false;
 	setRouteDest = false;
 	showNames = false;
@@ -25,6 +26,9 @@ export class PlayerSettings implements FilterOptions {
 	showAllyScanners = true;
 	showMinefields = true;
 	showMinefieldsOf: MinefieldOwner[] = [...MinefieldOwners];
+	showNotes = true;
+	// the kinds of note that aren't drawn on the map while notes are shown, see noteKinds()
+	hiddenNoteKinds: string[] = [];
 	showMessagePane = false;
 	showPlayerColors = false;
 	scannerPercent = 100;
@@ -69,6 +73,7 @@ export class PlayerSettings implements FilterOptions {
 	// some state we don't want to persist on load
 	afterLoad() {
 		this.addWaypoint = false;
+		this.addLabel = false;
 		this.messageTypeFilter = new Set<number>();
 		this.messageTypeFilterArray.forEach((t) => this.messageTypeFilter.add(t));
 	}
@@ -93,6 +98,11 @@ export class PlayerSettings implements FilterOptions {
 		if (this.showMinefields && this.showMinefieldsOf.length === 0) {
 			this.showMinefieldsOf = [...MinefieldOwners];
 		}
+	}
+	// hide these kinds of note, or hide all notes
+	setHiddenNoteKinds(hidden: string[], showNotes = true) {
+		this.hiddenNoteKinds = hidden;
+		this.showNotes = showNotes;
 	}
 	isMessageVisible(type: PlayerMessageType) {
 		return !this.messageTypeFilter.has(Number(type));

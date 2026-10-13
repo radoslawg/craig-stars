@@ -231,6 +231,7 @@ type Converter interface {
 	// goverter:ignore Designs
 	// goverter:ignore Spec
 	// goverter:ignore TechsJustGained
+	// goverter:ignore NewNotes
 	ConvertPlayer(source *craig_starsv1.Player) *cs.Player
 
 	// goverter:ignore ScoreHistory
@@ -348,6 +349,10 @@ type Converter interface {
 	ConvertCSMineralPackets(source []*cs.MineralPacket) []*craig_starsv1.MineralPacket
 
 	ConvertCSMysteryTraders(source []*cs.MysteryTrader) []*craig_starsv1.MysteryTrader
+
+	ConvertPlayerNote(source *craig_starsv1.PlayerNote) *cs.PlayerNote
+	ConvertCSPlayerNote(source *cs.PlayerNote) *craig_starsv1.PlayerNote
+	ConvertCSPlayerNotes(source []*cs.PlayerNote) []*craig_starsv1.PlayerNote
 
 	ConvertWormhole(source *craig_starsv1.Wormhole) *cs.Wormhole
 	ConvertCSWormhole(source *cs.Wormhole) *craig_starsv1.Wormhole

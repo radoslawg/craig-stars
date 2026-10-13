@@ -53,6 +53,7 @@ CREATE TABLE
     research_cost_electronics TEXT NOT NULL DEFAULT '',
     research_cost_biotechnology TEXT NOT NULL DEFAULT '',
     techs_start_high BOOLEAN NOT NULL DEFAULT 0,
+    description TEXT NOT NULL DEFAULT '',
     CONSTRAINT fk_users_races FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
   );
 
@@ -258,6 +259,7 @@ CREATE TABLE
     cannot_delete BOOLEAN NOT NULL DEFAULT 0,
     original_player_num INTEGER DEFAULT 0,
     mystery_trader BOOLEAN NOT NULL DEFAULT 0,
+    description TEXT NOT NULL DEFAULT '',
     UNIQUE (game_id, player_num, num),
     UNIQUE (game_id, player_num, name),
     CONSTRAINT fk_players_designs FOREIGN KEY (game_id, player_num) REFERENCES players (game_id, num) ON DELETE CASCADE
@@ -430,6 +432,25 @@ CREATE TABLE
   );
 
 CREATE TABLE
+  player_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    game_id INTEGER NOT NULL DEFAULT 0,
+    player_num INTEGER NOT NULL DEFAULT 0,
+    target_type TEXT NOT NULL DEFAULT '',
+    target_num INTEGER NOT NULL DEFAULT 0,
+    target_player_num INTEGER NOT NULL DEFAULT 0,
+    x REAL NOT NULL DEFAULT 0,
+    y REAL NOT NULL DEFAULT 0,
+    text TEXT NOT NULL DEFAULT '',
+    show_on_map BOOLEAN NOT NULL DEFAULT 0,
+    tags TEXT NOT NULL DEFAULT '[]',
+    CONSTRAINT fk_players_player_notes FOREIGN KEY (game_id, player_num) REFERENCES players (game_id, num) ON DELETE CASCADE,
+    CONSTRAINT fk_games_player_notes FOREIGN KEY (game_id) REFERENCES games (id) ON DELETE CASCADE
+  );
+
+CREATE TABLE
   versions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -477,6 +498,19 @@ CREATE INDEX idx_mineral_packets_gameid ON mineral_packets (game_id);
 
 CREATE INDEX idx_mystery_traders_gameid ON mystery_traders (game_id);
 
+CREATE INDEX idx_player_notes_gameid_playernum ON player_notes (game_id, player_num);
+
+-- a player has at most one note per map object, notes without a target are labels on the map
+CREATE UNIQUE INDEX idx_player_notes_target_unique ON player_notes (
+  game_id,
+  player_num,
+  target_type,
+  target_num,
+  target_player_num
+)
+WHERE
+  target_type <> '';
+
 CREATE UNIQUE INDEX idx_users_discord_id_unique ON users (discord_id)
 WHERE
   discord_id <> '';
@@ -505,3 +539,31 @@ INSERT INTO
   versions (CURRENT)
 VALUES
   (0);
+
+-- fleet nums are reused, so a note on a fleet goes away when the fleet does
+CREATE TRIGGER trg_fleets_delete_player_notes AFTER DELETE ON fleets WHEN OLD.starbase = 0 BEGIN
+DELETE FROM player_notes
+WHERE
+  game_id = OLD.game_id
+  AND target_type = 'Fleet'
+  AND target_player_num = OLD.player_num
+  AND target_num = OLD.num;
+
+END;
+
+-- a fleet given to another player, or renumbered, isn't the fleet the note was written for anymore
+CREATE TRIGGER trg_fleets_update_player_notes AFTER
+UPDATE OF player_num,
+num ON fleets WHEN OLD.starbase = 0
+AND (
+  OLD.player_num <> NEW.player_num
+  OR OLD.num <> NEW.num
+) BEGIN
+DELETE FROM player_notes
+WHERE
+  game_id = OLD.game_id
+  AND target_type = 'Fleet'
+  AND target_player_num = OLD.player_num
+  AND target_num = OLD.num;
+
+END;

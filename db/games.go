@@ -238,7 +238,9 @@ func (c *client) GetFullGame(ctx context.Context, id int64) (*cs.FullGame, error
 	universe.MysteryTraders = mysteryTraders
 
 	// TODO: eventually allow rules overrides, but for now, always use standard rules
-	game.Rules = cs.NewRules()
+	// Seed from the game and year so generating a turn from the same saved
+	// state gives the same result.
+	game.Rules = cs.NewRulesWithSeed(game.Seed + int64(game.Year))
 
 	// load a tech store if this game has a separate one
 	techStore := &cs.StaticTechStore
@@ -358,6 +360,28 @@ func (c *client) UpdateFullGame(ctx context.Context, fullGame *cs.FullGame) erro
 		if err := c.SaveFleet(ctx, fleet); err != nil {
 			return fmt.Errorf("save fleet: %w", err)
 		}
+	}
+
+	// notes turn generation wrote for the players' new fleets. Deleting a fleet deletes its note, so
+	// a fleet that reuses a num starts without one.
+	for _, player := range fullGame.Players {
+		for _, note := range player.NewNotes {
+			note.GameID = fullGame.ID
+			// a player has one note per map object, don't let a stale one fail the turn
+			if _, err := c.writer.DeletePlayerNoteForTarget(ctx, generated.DeletePlayerNoteForTargetParams{
+				GameID:          note.GameID,
+				PlayerNum:       int64(note.PlayerNum),
+				TargetType:      note.TargetType,
+				TargetNum:       int64(note.TargetNum),
+				TargetPlayerNum: int64(note.TargetPlayerNum),
+			}); err != nil {
+				return fmt.Errorf("delete stale player note: %w", err)
+			}
+			if err := c.SavePlayerNote(ctx, note); err != nil {
+				return fmt.Errorf("save player note: %w", err)
+			}
+		}
+		player.NewNotes = nil
 	}
 
 	// save fleets

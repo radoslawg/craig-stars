@@ -794,6 +794,34 @@ func (c *GameConverter) ConvertGamePlayer(source *cs.Player) generated.Player {
 	}
 	return generatedPlayer
 }
+func (c *GameConverter) ConvertGamePlayerNoteToCreateParams(source *cs.PlayerNote) generated.CreatePlayerNoteParams {
+	var generatedCreatePlayerNoteParams generated.CreatePlayerNoteParams
+	if source != nil {
+		generatedCreatePlayerNoteParams.GameID = (*source).GameDBObject.GameID
+		generatedCreatePlayerNoteParams.PlayerNum = IntToInt64((*source).PlayerNum)
+		generatedCreatePlayerNoteParams.TargetType = c.csMapObjectTypeToCsMapObjectType((*source).TargetType)
+		generatedCreatePlayerNoteParams.TargetNum = IntToInt64((*source).TargetNum)
+		generatedCreatePlayerNoteParams.TargetPlayerNum = IntToInt64((*source).TargetPlayerNum)
+		generatedCreatePlayerNoteParams.X = IntToFloat64((*source).Position.X)
+		generatedCreatePlayerNoteParams.Y = IntToFloat64((*source).Position.Y)
+		generatedCreatePlayerNoteParams.Text = (*source).Text
+		generatedCreatePlayerNoteParams.ShowOnMap = (*source).ShowOnMap
+		generatedCreatePlayerNoteParams.Tags = GamePlayerNoteTagsToPlayerNoteTags((*source).Tags)
+	}
+	return generatedCreatePlayerNoteParams
+}
+func (c *GameConverter) ConvertGamePlayerNoteToUpdateParams(source *cs.PlayerNote) generated.UpdatePlayerNoteParams {
+	var generatedUpdatePlayerNoteParams generated.UpdatePlayerNoteParams
+	if source != nil {
+		generatedUpdatePlayerNoteParams.X = IntToFloat64((*source).Position.X)
+		generatedUpdatePlayerNoteParams.Y = IntToFloat64((*source).Position.Y)
+		generatedUpdatePlayerNoteParams.Text = (*source).Text
+		generatedUpdatePlayerNoteParams.ShowOnMap = (*source).ShowOnMap
+		generatedUpdatePlayerNoteParams.Tags = GamePlayerNoteTagsToPlayerNoteTags((*source).Tags)
+		generatedUpdatePlayerNoteParams.ID = (*source).GameDBObject.ID
+	}
+	return generatedUpdatePlayerNoteParams
+}
 func (c *GameConverter) ConvertGamePlayerToCreateParams(source *cs.Player) generated.CreatePlayerParams {
 	var generatedCreatePlayerParams generated.CreatePlayerParams
 	if source != nil {
@@ -950,6 +978,7 @@ func (c *GameConverter) ConvertGameRace(source *cs.Race) generated.Race {
 		generatedRace.ResearchCostElectronics = c.csResearchCostLevelToCsResearchCostLevel((*source).ResearchCost.Electronics)
 		generatedRace.ResearchCostBiotechnology = c.csResearchCostLevelToCsResearchCostLevel((*source).ResearchCost.Biotechnology)
 		generatedRace.TechsStartHigh = (*source).TechsStartHigh
+		generatedRace.Description = (*source).Description
 	}
 	return generatedRace
 }
@@ -987,6 +1016,7 @@ func (c *GameConverter) ConvertGameRaceToCreateParams(source *cs.Race) generated
 		generatedCreateRaceParams.ResearchCostElectronics = c.csResearchCostLevelToCsResearchCostLevel((*source).ResearchCost.Electronics)
 		generatedCreateRaceParams.ResearchCostBiotechnology = c.csResearchCostLevelToCsResearchCostLevel((*source).ResearchCost.Biotechnology)
 		generatedCreateRaceParams.TechsStartHigh = (*source).TechsStartHigh
+		generatedCreateRaceParams.Description = (*source).Description
 	}
 	return generatedCreateRaceParams
 }
@@ -1024,6 +1054,7 @@ func (c *GameConverter) ConvertGameRaceToUpdateParams(source *cs.Race) generated
 		generatedUpdateRaceParams.ResearchCostElectronics = c.csResearchCostLevelToCsResearchCostLevel((*source).ResearchCost.Electronics)
 		generatedUpdateRaceParams.ResearchCostBiotechnology = c.csResearchCostLevelToCsResearchCostLevel((*source).ResearchCost.Biotechnology)
 		generatedUpdateRaceParams.TechsStartHigh = (*source).TechsStartHigh
+		generatedUpdateRaceParams.Description = (*source).Description
 		generatedUpdateRaceParams.ID = (*source).DBObject.ID
 	}
 	return generatedUpdateRaceParams
@@ -1103,6 +1134,7 @@ func (c *GameConverter) ConvertGameShipDesign(source *cs.ShipDesign) generated.S
 		generatedShipDesign.CannotDelete = (*source).CannotDelete
 		generatedShipDesign.OriginalPlayerNum = IntToNullInt64((*source).OriginalPlayerNum)
 		generatedShipDesign.MysteryTrader = (*source).MysteryTrader
+		generatedShipDesign.Description = (*source).Description
 	}
 	return generatedShipDesign
 }
@@ -1123,6 +1155,7 @@ func (c *GameConverter) ConvertGameShipDesignToCreateParams(source *cs.ShipDesig
 		generatedCreateShipDesignParams.Purpose = &pCsShipDesignPurpose
 		generatedCreateShipDesignParams.MysteryTrader = (*source).MysteryTrader
 		generatedCreateShipDesignParams.Spec = GameShipDesignSpecToShipDesignSpec((*source).Spec)
+		generatedCreateShipDesignParams.Description = (*source).Description
 	}
 	return generatedCreateShipDesignParams
 }
@@ -1143,6 +1176,7 @@ func (c *GameConverter) ConvertGameShipDesignToUpdateParams(source *cs.ShipDesig
 		generatedUpdateShipDesignParams.Purpose = &pCsShipDesignPurpose
 		generatedUpdateShipDesignParams.MysteryTrader = (*source).MysteryTrader
 		generatedUpdateShipDesignParams.Spec = GameShipDesignSpecToShipDesignSpec((*source).Spec)
+		generatedUpdateShipDesignParams.Description = (*source).Description
 		generatedUpdateShipDesignParams.ID = (*source).GameDBObject.ID
 	}
 	return generatedUpdateShipDesignParams
@@ -1327,6 +1361,7 @@ func (c *GameConverter) ConvertGetPlayerForGameRowToShipDesign(source generated.
 	generatedShipDesign.CannotDelete = NullBoolToBool(source.CannotDelete)
 	generatedShipDesign.OriginalPlayerNum = source.OriginalPlayerNum
 	generatedShipDesign.MysteryTrader = NullBoolToBool(source.MysteryTrader)
+	generatedShipDesign.Description = NullStringToString(source.Description)
 	return generatedShipDesign
 }
 func (c *GameConverter) ConvertGetPlayersWithDesignsForGameRowToShipDesign(source generated.GetPlayersWithDesignsForGameRow) generated.ShipDesign {
@@ -1347,6 +1382,7 @@ func (c *GameConverter) ConvertGetPlayersWithDesignsForGameRowToShipDesign(sourc
 	generatedShipDesign.CannotDelete = NullBoolToBool(source.CannotDelete)
 	generatedShipDesign.OriginalPlayerNum = source.OriginalPlayerNum
 	generatedShipDesign.MysteryTrader = NullBoolToBool(source.MysteryTrader)
+	generatedShipDesign.Description = NullStringToString(source.Description)
 	return generatedShipDesign
 }
 func (c *GameConverter) ConvertLightPlayer(source generated.GetLightPlayerForGameRow) cs.Player {
@@ -1525,6 +1561,29 @@ func (c *GameConverter) ConvertPlayer(source generated.Player) cs.Player {
 	csPlayer.Stats = PlayerStatsToGamePlayerStats(source.Stats)
 	return csPlayer
 }
+func (c *GameConverter) ConvertPlayerNote(source generated.PlayerNote) *cs.PlayerNote {
+	var csPlayerNote cs.PlayerNote
+	csPlayerNote.GameDBObject = c.generatedPlayerNoteToCsGameDBObject(source)
+	csPlayerNote.PlayerNum = Int64ToInt(source.PlayerNum)
+	csPlayerNote.TargetType = c.csMapObjectTypeToCsMapObjectType(source.TargetType)
+	csPlayerNote.TargetNum = Int64ToInt(source.TargetNum)
+	csPlayerNote.TargetPlayerNum = Int64ToInt(source.TargetPlayerNum)
+	csPlayerNote.Position = c.generatedPlayerNoteToCsVectorGeneric(source)
+	csPlayerNote.Text = source.Text
+	csPlayerNote.Tags = PlayerNoteTagsToGamePlayerNoteTags(source.Tags)
+	csPlayerNote.ShowOnMap = source.ShowOnMap
+	return &csPlayerNote
+}
+func (c *GameConverter) ConvertPlayerNotes(source []generated.PlayerNote) []*cs.PlayerNote {
+	var pCsPlayerNoteList []*cs.PlayerNote
+	if source != nil {
+		pCsPlayerNoteList = make([]*cs.PlayerNote, len(source))
+		for i := 0; i < len(source); i++ {
+			pCsPlayerNoteList[i] = c.ConvertPlayerNote(source[i])
+		}
+	}
+	return pCsPlayerNoteList
+}
 func (c *GameConverter) ConvertPlayerStatus(source generated.GetPlayersStatusForGameRow) cs.Player {
 	var csPlayer cs.Player
 	csPlayer.GameDBObject = ExtendPlayerStatusGameDBObject(source)
@@ -1567,6 +1626,7 @@ func (c *GameConverter) ConvertRace(source generated.Race) cs.Race {
 	csRace.UserID = source.UserID
 	csRace.Name = source.Name
 	csRace.PluralName = source.PluralName
+	csRace.Description = source.Description
 	csRace.SpendLeftoverPointsOn = source.SpendLeftoverPointsOn
 	csRace.PRT = source.Prt
 	csRace.LRTs = c.csBitmaskToCsBitmask(source.Lrts)
@@ -1622,6 +1682,7 @@ func (c *GameConverter) ConvertShipDesign(source generated.ShipDesign) *cs.ShipD
 	csShipDesign.PlayerNum = Int64ToInt(source.PlayerNum)
 	csShipDesign.OriginalPlayerNum = NullInt64ToInt(source.OriginalPlayerNum)
 	csShipDesign.Name = source.Name
+	csShipDesign.Description = source.Description
 	csShipDesign.Version = Int64ToInt(source.Version)
 	csShipDesign.Hull = source.Hull
 	csShipDesign.HullSetNumber = Int64ToInt(source.HullSetNumber)
@@ -1840,6 +1901,20 @@ func (c *GameConverter) generatedPlanetToCsPlanetOrders(source generated.Planet)
 	csPlanetOrders.PacketTargetNum = Int64ToInt(source.PacketTargetNum)
 	csPlanetOrders.PacketSpeed = Int64ToInt(source.PacketSpeed)
 	return csPlanetOrders
+}
+func (c *GameConverter) generatedPlayerNoteToCsGameDBObject(source generated.PlayerNote) cs.GameDBObject {
+	var csGameDBObject cs.GameDBObject
+	csGameDBObject.ID = source.ID
+	csGameDBObject.GameID = source.GameID
+	csGameDBObject.CreatedAt = c.timeTimeToTimeTime(source.CreatedAt)
+	csGameDBObject.UpdatedAt = c.timeTimeToTimeTime(source.UpdatedAt)
+	return csGameDBObject
+}
+func (c *GameConverter) generatedPlayerNoteToCsVectorGeneric(source generated.PlayerNote) cs.VectorGeneric[int] {
+	var csVectorGeneric cs.VectorGeneric[int]
+	csVectorGeneric.X = Float64ToInt(source.X)
+	csVectorGeneric.Y = Float64ToInt(source.Y)
+	return csVectorGeneric
 }
 func (c *GameConverter) generatedPlayerToCsIntels(source generated.Player) cs.Intels {
 	var csIntels cs.Intels

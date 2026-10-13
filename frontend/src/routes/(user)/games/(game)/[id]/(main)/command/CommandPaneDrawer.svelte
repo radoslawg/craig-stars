@@ -21,6 +21,8 @@
 	import { MapObjectType } from '#lib/types/cs-proto.js';
 	import { commandable, getMapObjectName } from '#lib/types/MapObject.js';
 	import { distance, emptyVector } from '#lib/types/Vector.js';
+	import { PencilSquare } from '@steeze-ui/heroicons';
+	import { Icon } from '@steeze-ui/svelte-icon';
 	import { slide } from 'svelte/transition';
 	import MapObjectSummary from '../MapObjectSummary.svelte';
 	import MapObjectSummaryCollapsed from '../MapObjectSummaryMini.svelte';
@@ -35,6 +37,7 @@
 	import PlanetMineralsOnHandTile from './PlanetMineralsOnHandTile.svelte';
 	import PlanetProductionTile from './PlanetProductionTile.svelte';
 	import PlanetStarbaseTile from './PlanetStarbaseTile.svelte';
+	import TagBadge from '#lib/components/game/TagBadge.svelte';
 	import PlanetStatusTile from './PlanetStatusTile.svelte';
 	import PlanetSummaryTile from './PlanetSummaryTile.svelte';
 	import { pickSummaryMapObject, summaryKey, type LastPicked } from './CommandPaneSummary';
@@ -43,6 +46,8 @@
 		player,
 		settings,
 		universe,
+		readOnly,
+		editNote,
 		commandedFleet,
 		commandedMapObject,
 		commandedPlanet,
@@ -110,6 +115,12 @@
 	let summaryMapObject = $derived(
 		pickSummaryMapObject($selectedMapObject, $commandedMapObject, $settings.addWaypoint, lastPicked)
 	);
+
+	// notes are written about planets and the player's own fleets
+	let noteTarget = $derived(
+		summaryMapObject && $universe.canHaveNote(summaryMapObject) ? summaryMapObject : undefined
+	);
+	let note = $derived($universe.getNote(noteTarget));
 
 	let dist = $derived(
 		$commandedMapObject && $selectedMapObject
@@ -321,6 +332,23 @@
 				</DisclosureHeader>
 
 				<MapObjectSummaryCollapsed mapObject={summaryMapObject} {onShowCargoTransferDialog} />
+				{#if noteTarget && (note || !$readOnly)}
+					<button
+						type="button"
+						class="flex flex-row items-center gap-1 mt-2 w-full overflow-hidden text-sm text-left"
+						aria-label={note ? 'Edit notes and tags' : 'Add notes and tags'}
+						data-type="map-object-note-button"
+						onclick={() => editNote(noteTarget)}
+					>
+						<Icon src={PencilSquare} class={`size-4 flex-none ${note ? 'stroke-accent' : ''}`} />
+						{#each note?.tags ?? [] as tag (tag)}
+							<TagBadge {tag} class="flex-none" />
+						{/each}
+						<span class="truncate italic" data-type="map-object-note"
+							>{note ? note.text : 'Add notes or tags'}</span
+						>
+					</button>
+				{/if}
 			</div>
 		{/if}
 	</div>
