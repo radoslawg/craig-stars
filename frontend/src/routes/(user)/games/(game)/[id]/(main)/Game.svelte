@@ -35,6 +35,7 @@
 	import { onMount } from 'svelte';
 	import CargoTranfserDialog from '../dialogs/cargo/CargoTransferDialog.svelte';
 	import MergeFleetsDialog from '../dialogs/merge/MergeFleetsDialog.svelte';
+	import MailDialog from '../dialogs/mail/MailDialog.svelte';
 	import NoteDialog from '../dialogs/note/NoteDialog.svelte';
 	import ProductionQueueDialog from '../dialogs/production/ProductionQueueDialog.svelte';
 	import SplitFleetDialog from '../dialogs/split/SplitFleetDialog.svelte';
@@ -442,6 +443,10 @@
 		let selectedIndex = selectables.findIndex((mo) => mapObjectEqual($selectedMapObject, mo));
 
 		if (commandables.length === 0) {
+			// nothing of ours is here, i.e. an enemy planet, cycle through what is
+			if (selectables.length > 0) {
+				selectMapObject(selectables[(selectedIndex + 1) % selectables.length]);
+			}
 			return;
 		}
 
@@ -712,4 +717,5 @@
 		onCancel={() => (showSearchDialog = false)}
 	/>
 	<NoteDialog />
+	<MailDialog />
 </div>
