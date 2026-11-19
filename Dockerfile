@@ -12,7 +12,7 @@
 #  Login:  admin / admin  (change it after first login!)
 # =============================================================================
 
-ARG GO_VERSION=1.27.3
+ARG GO_VERSION=1.27.4
 ARG NODE_VERSION=24
 ARG ALPINE_VERSION=3.22
 
